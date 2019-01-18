@@ -114,10 +114,11 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 		DBG("got a invalid dhcp packet");
 		return;
 	}
-	if (get_dhcp_message_type(p) == DHCPDISCOVER) {
-		DBG("got a DHCPDISCOVER on dhcp");
+
+	if (get_dhcp_message_type(p) == DHCPREQUEST) {
+		DBG("got a DHCPREQUEST on dhcp");
 	} else {
-		DBG("got a non-DHCPDISCOVER dhcp packet");
+		DBG("got a non-REQUEST dhcp packet");
 		return;
 	}
 
@@ -129,7 +130,7 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 	}
 
 	/* create response */
-	init_packet(&re, p, DHCPOFFER);
+	init_packet(&re, p, DHCPACK);
 	/* re.ciaddr is 0.0.0.0 */
 	/* re.yiaddr is 0.0.0.0 */
 	re.siaddr = tftp_ip;
@@ -145,18 +146,6 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 	if (res == -1) {
 		DBG("add_dhcp_option() failed");
 		return;
-	}
-
-	/* set vendor options */
-	{
-		u_char vop[3];
-		vop[0] = PXE_DISCOVERY_CONTROL;
-		vop[1] = 1;
-		vop[2] = PXE_DISCOVERY_CONTROL_BIT3;
-		if (add_dhcp_option(&re, DHO_VENDOR_ENCAPSULATED_OPTIONS, vop, 3) == -1) {
-			DBG("add_dhcp_option() failed");
-			return;
-		}
 	}
 
 	/* send the response */
