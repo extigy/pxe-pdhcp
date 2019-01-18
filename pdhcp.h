@@ -29,7 +29,7 @@
 #include <arpa/inet.h>
 #include "dhcp.h"
 
-#define DHCP_SERVER_PORT   67
+#define DHCP_SERVER_PORT   4011
 #define DHCP_CLIENT_PORT   68
 
 #define DHCP_OPTIONS_COOKIE_LEN  4
