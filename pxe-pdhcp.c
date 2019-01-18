@@ -63,7 +63,7 @@ int stopflag = 0;
 int foreground = 0;
 
 struct sockaddr_in server_address;
-struct sockaddr_in bcast_address;
+struct sockaddr_in reply_address;
 struct in_addr tftp_ip;
 char* nbp_name;
 
@@ -133,6 +133,8 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 	/* re.ciaddr is 0.0.0.0 */
 	/* re.yiaddr is 0.0.0.0 */
 	re.siaddr = tftp_ip;
+	reply_address.sin_addr = ((struct sockaddr_in*)client_address)->sin_addr;
+
 	memcpy(re.chaddr, p->chaddr, sizeof(re.chaddr));
 	strcpy(re.file, nbp_name);
 
@@ -160,7 +162,7 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 	/* send the response */
 	packet_len = get_dhcp_packet_len(&re);
 	res = sendto(server_socket, &re, packet_len, 0,
-		(struct sockaddr*)&bcast_address, sizeof(bcast_address));
+		(struct sockaddr*)&reply_address, sizeof(reply_address));
 	if (res != packet_len) {
 		LOG("sendto() failed or was not complete: %s", strerror(errno));
 		return;
@@ -260,17 +262,16 @@ void parse_argv(int argc, char* argv[])
 
 	char* listen_dev;
 	int set_server_address = 0;
-	int set_bcast_address = 0;
 	int set_tftp_ip  = 0;
 
 	memset(&server_address, 0, sizeof(server_address));
-	memset(&bcast_address, 0, sizeof(bcast_address));
+	memset(&reply_address, 0, sizeof(reply_address));
 	memset(&tftp_ip,  0, sizeof(tftp_ip));
 	listen_dev = NULL;
 	nbp_name = NULL;
 
 
-	while ((opt = getopt(argc, argv, "i:l:b:t:d")) != -1) {
+	while ((opt = getopt(argc, argv, "i:l:t:d")) != -1) {
 		switch(opt) {
 		case 'i':
 			listen_dev = optarg;
@@ -281,13 +282,6 @@ void parse_argv(int argc, char* argv[])
 				exit(1);
 			}
 			set_server_address = 1;
-			break;
-		case 'b':
-			if (!inet_aton(optarg, &bcast_address.sin_addr)) {
-				perror(optarg);
-				exit(1);
-			}
-			set_bcast_address = 1;
 			break;
 		case 't':
 			if (!inet_aton(optarg, &tftp_ip)) {
@@ -310,7 +304,7 @@ void parse_argv(int argc, char* argv[])
 	}
 	nbp_name = argv[optind];
 
-	if (!set_server_address || !set_tftp_ip || !set_bcast_address) {
+	if (!set_server_address || !set_tftp_ip) {
 		/* get these addresses from listen_dev */
 		struct ifreq ifr;
 		int s;
@@ -341,23 +335,13 @@ void parse_argv(int argc, char* argv[])
 				tftp_ip = ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr;
 		}
 
-		if (!set_bcast_address) {
-			if (ioctl(s, SIOCGIFBRDADDR, &ifr) == -1) {
-				perror("cannot get broadcast address of listen interface");
-				close(s);
-				exit(1);
-			}
-			bcast_address.sin_addr =
-				((struct sockaddr_in*)&ifr.ifr_broadaddr)->sin_addr;
-		}
-
 		close(s);
 	}
 
 	server_address.sin_port = ntohs(DHCP_SERVER_PORT);
 	server_address.sin_family = AF_INET;
-	bcast_address.sin_port = ntohs(DHCP_CLIENT_PORT);
-	bcast_address.sin_family = AF_INET;
+	reply_address.sin_port = ntohs(DHCP_CLIENT_PORT);
+	reply_address.sin_family = AF_INET;
 }
 
 int main(int argc, char* argv[])
@@ -366,8 +350,7 @@ int main(int argc, char* argv[])
 
 	printf("listen address:     %s:%d\n", inet_ntoa(server_address.sin_addr),
 		ntohs(server_address.sin_port));
-	printf("broadcast address   %s:%d\n", inet_ntoa(bcast_address.sin_addr),
-		ntohs(bcast_address.sin_port));
+	printf("reply port:         %d\n", DHCP_CLIENT_PORT);
 	printf("tftp address:       %s\n", inet_ntoa(tftp_ip));
 	printf("nbp name:           %s\n", nbp_name);
 
