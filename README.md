@@ -9,18 +9,17 @@ you can set up network boot environment without re-configuring existent DHCP
 server.
 
     usage: pxe-pdhcp  [-d] [-i interface]
-                      [-l listen address] [-t tftp address] [-b broadcast address]
-                      <nbp name>
+                      [-l listen address] [-t tftp address] <nbp name>
 
-pxe-pdhcp listens on two well-known ports (67/udp and 68/udp) so the root
+pxe-pdhcp listens and replies on ports (4011/udp and 68/udp) so the root
 privilege is needed to run.
 
 With -d option, pxe-pdhcp runs on foreground. This option is useful for debugging.
 
 Specify nework interface name ('eth0' for example, on Linux) to -i option.
 
-If the network interface has more than one IP address, use -l, -t, -b options.
--i or (-l,-t and -b) option is required.
+If the network interface has more than one IP address, use the -l, -t options.
+The -i or (-l and -t) option is required.
 
 Finally specify the path of Network Bootstrap Program on the TFTP server to
 <nbp name> option. It will be 'pxelinux.0' if you are using PXELINUX.
