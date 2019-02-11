@@ -4,7 +4,8 @@ After=network.target
 
 [Service]
 TimeoutStartSec=10
-ExecStart=/usr/local/bin/pxe-pdhcp
+EnvironmentFile=/etc/pxe-pdhcp.conf
+ExecStart=/usr/local/bin/pxe-pdhcp ${ARGS} -i ${IFACE} ${BIOSBIN} ${EFIBIN}
 Restart=on-failure
 
 [Install]
