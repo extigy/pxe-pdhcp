@@ -66,6 +66,7 @@ struct sockaddr_in server_address;
 struct sockaddr_in reply_address;
 struct in_addr tftp_ip;
 char* nbp_name;
+char* nbp_name_efi;
 
 int server_socket;
 
@@ -107,44 +108,84 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 	u_char optlen;
 	struct dhcp_packet re;
 	int res;
-
-	DBG("dhcp_reply start");
+	u_char arch[2];
+	char addr[1024];
 
 	if (check_dhcp_packet(p) == -1) {
-		DBG("got a invalid dhcp packet");
+		DBG("Got an invalid packet.");
 		return;
 	}
 
 	if (get_dhcp_message_type(p) == DHCPREQUEST) {
-		DBG("got a DHCPREQUEST on dhcp");
+		inet_ntop(AF_INET, &(((struct sockaddr_in*)client_address)->sin_addr), addr, 1024);
+		DBG("Got a DHCPREQUEST packet from: %s",addr);
 	} else {
-		DBG("got a non-REQUEST dhcp packet");
+		DBG("Got a non-REQUEST packet. Not replying...");
 		return;
 	}
 
 	/* check vendor class identifier ("PXEClient") */
 	res = get_dhcp_option(p, DHO_VENDOR_CLASS_IDENTIFIER, &opt, &optlen);
 	if (res == -1 || strncmp((char*)opt, PXE_IDENTIFIER_STRING, strlen(PXE_IDENTIFIER_STRING)) != 0) {
-		LOG("got a non-PXE dhcp packet");
+		LOG("Got a non-PXE dhcp packet. Not replying...");
 		return;
 	}
+	DBG("Packet is a PXE packet");
+
+	/* check BIOS/UEFI */
+	res = get_dhcp_option(p, 93, &opt, &optlen);
+	if (res == -1 || optlen < 2){
+		LOG("Architecture missing. Not replying...");
+		return;
+	}
+	DBG("Architecture bytes are: 0x%02X 0x%02X",opt[0],opt[1]);
+	arch[0] = opt[0];
+	arch[1] = opt[1];
 
 	/* create response */
 	init_packet(&re, p, DHCPACK);
-	/* re.ciaddr is 0.0.0.0 */
-	/* re.yiaddr is 0.0.0.0 */
 	re.siaddr = tftp_ip;
 	reply_address.sin_addr = ((struct sockaddr_in*)client_address)->sin_addr;
-
 	memcpy(re.chaddr, p->chaddr, sizeof(re.chaddr));
-	strcpy(re.file, nbp_name);
+
+	if(arch[1] == 0){
+		DBG("This looks like a BIOS boot. Sending: %s", nbp_name);
+		strcpy(re.file, nbp_name);
+	} else {
+		DBG("This looks like a EFI boot. Sending: %s", nbp_name_efi);
+		strcpy(re.file, nbp_name_efi);
+	}
 
 	/* set vendor class identifier */
 	res = add_dhcp_option(&re, DHO_VENDOR_CLASS_IDENTIFIER,
 		(u_char*)PXE_IDENTIFIER_STRING,
 		strlen(PXE_IDENTIFIER_STRING));
 	if (res == -1) {
-		DBG("add_dhcp_option() failed");
+		DBG("add_dhcp_option(DHO_VENDOR_CLASS_IDENTIFIER) failed");
+		return;
+	}
+
+	/* set Option 66 to TFTP server IP */
+	inet_ntop(AF_INET, &tftp_ip, addr, 1024);
+	DBG("Setting Option 66: %s", addr);
+	res = add_dhcp_option(&re, 66, (u_char*)addr, strlen(addr));
+	if (res == -1) {
+		DBG("add_dhcp_option(66) failed");
+		return;
+
+	}
+	/* set Option 67 to TFTP NBP*/
+	DBG("Setting Option 67: %s", re.file);
+	res = add_dhcp_option(&re, 67, (u_char*)re.file, strlen(re.file));
+	if (res == -1) {
+		DBG("add_dhcp_option(67) failed");
+		return;
+	}
+
+	/* set Option 93, arch */
+	res = add_dhcp_option(&re, 93, arch, sizeof(arch));
+	if (res == -1) {
+		DBG("add_dhcp_option(93) failed");
 		return;
 	}
 
@@ -157,7 +198,8 @@ void dhcp_reply(struct dhcp_packet *p, struct sockaddr* client_address, socklen_
 		return;
 	}
 
-	DBG("dhcp_reply end");
+	inet_ntop(AF_INET, &(reply_address.sin_addr), addr, 1024);
+	DBG("Replied to: %s:%d",addr,DHCP_CLIENT_PORT);
 }
 
 void pdhcp(void)
@@ -241,8 +283,8 @@ int install_signal_handler(void)
 
 void usage(const char* prog)
 {
-	fprintf(stderr, "usage: %s  [-d] [-i interface] [-l listen address] [-t tftp address] [-b broadcast address] <nbp name>\n", prog);
-	fprintf(stderr, "-i or (-l, -t and -b), and <nbp name> options are needed.\n");
+	fprintf(stderr, "usage: %s  [-d] [-i interface] [-l listen address] [-t tftp address] <nbp name> <efi nbp name>\n", prog);
+	fprintf(stderr, "-i or (-l and -t), and <nbp name>, <efi nbp name> options are needed.\n");
 }
 
 void parse_argv(int argc, char* argv[])
@@ -258,6 +300,7 @@ void parse_argv(int argc, char* argv[])
 	memset(&tftp_ip,  0, sizeof(tftp_ip));
 	listen_dev = NULL;
 	nbp_name = NULL;
+	nbp_name_efi = NULL;
 
 
 	while ((opt = getopt(argc, argv, "i:l:t:d")) != -1) {
@@ -291,7 +334,13 @@ void parse_argv(int argc, char* argv[])
 		usage(argv[0]);
 		exit(1);
 	}
-	nbp_name = argv[optind];
+	nbp_name = argv[optind++];
+
+	if (optind >= argc) {
+		usage(argv[0]);
+		exit(1);
+	}
+	nbp_name_efi = argv[optind];
 
 	if (!set_server_address || !set_tftp_ip) {
 		/* get these addresses from listen_dev */
@@ -337,11 +386,12 @@ int main(int argc, char* argv[])
 {
 	parse_argv(argc, argv);
 
-	printf("listen address:     %s:%d\n", inet_ntoa(server_address.sin_addr),
+	printf("PXE listen address:     %s:%d\n", inet_ntoa(server_address.sin_addr),
 		ntohs(server_address.sin_port));
-	printf("reply port:         %d\n", DHCP_CLIENT_PORT);
-	printf("tftp address:       %s\n", inet_ntoa(tftp_ip));
-	printf("nbp name:           %s\n", nbp_name);
+	printf("PXE reply port:         %d\n", DHCP_CLIENT_PORT);
+	printf("TFTP Address:       %s\n", inet_ntoa(tftp_ip));
+	printf("NBP name:           %s\n", nbp_name);
+	printf("EFI NBP name:       %s\n", nbp_name_efi);
 
 	/* install signal handler */
 	if (install_signal_handler() == -1) {
