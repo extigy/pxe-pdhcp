@@ -1,0 +1,11 @@
+[Unit]
+Description=Preboot Execution Environment (PXE) server
+After=network.target
+
+[Service]
+TimeoutStartSec=10
+ExecStart=/usr/local/bin/pxe-pdhcp
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
